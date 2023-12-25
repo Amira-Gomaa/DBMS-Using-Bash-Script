@@ -1,0 +1,285 @@
+#: /usr/bin/bash
+
+PS3="$PWD >> "
+
+function create_db {
+    read -p "Please Enter DB Name: " name
+    if [[ ! $name =~ ^[a-zA-Z0-9_] ]]; then
+        echo "Invalid database name. Use only alphanumeric characters and underscores."
+    elif [ -e "$name" ]; then
+        echo "This database name already exists."
+    else
+        mkdir "$name" || exit 1
+        echo "Database '$name' created successfully."
+
+        echo -e "Tables:\n" > "$name/metadata.txt"
+    fi
+}
+
+function list_db {
+    if [ "$(ls -A)" ]; then
+        ls -F | grep '/'
+    else
+        echo "No databases found."
+    fi
+}
+
+function remove_db {
+    read -p "Please Enter DB Name: " name
+    if [ -d "$name" ]; then
+        rm -ir "$name" || exit 1
+        echo "Database '$name' removed successfully."
+    else
+        echo "Error: No such DB name."
+    fi
+}
+
+function insert_column {
+    read -p "Enter column name: " column
+    if validate_column_name "$column"; then
+        read -p "Is this column a primary key? (yes/no): " is_primary
+        if [[ "$is_primary" == "yes" ]]; then
+            read -p "Is this primary key a number or a string? (number/string): " key_type
+            if [[ "$key_type" == "number" || "$key_type" == "string" ]]; then
+                echo "Column '$column' inserted successfully as a primary key of type '$key_type'."
+            else
+                echo "Invalid key type. Please choose 'number' or 'string'."
+            fi
+        elif [[ "$is_primary" == "no" ]]; then
+            echo "Column '$column' inserted successfully."
+        else
+            echo "Invalid choice. Please enter 'yes' or 'no' for primary key."
+        fi
+    else
+        echo "Please enter a valid column name."
+    fi
+}
+
+function alter_column {
+    read -p "Enter the name of the column to be altered: " old_column
+    if [ -n "$old_column" ]; then
+        read -p "Enter the new name for the column: " new_column
+        if validate_column_name "$new_column"; then
+            echo "Column '$old_column' altered successfully. Renamed to '$new_column'."
+        else
+            echo "Invalid column name. Please use only alphanumeric characters and underscores. Must start with a letter or underscore."
+        fi
+    else
+        echo "Please enter a valid column name."
+    fi
+}
+
+function add_table_to_metadata {
+    local db_name="$1"
+    local table_name="$2"
+    echo "Tables: $table_name" >> "$db_name/metadata.txt"
+}
+
+function insert_record {
+    read -p "Please Enter Table Name: " name
+    if [ -e "$name" ]; then
+        echo "Enter record values separated by comma. Press enter when finished."
+        read -p ">> " values
+        echo "Inserting record..."
+        echo "$values" >> "$name"
+    else
+        echo "Error: No such table name."
+    fi
+}
+
+function update_data {
+    read -p "Please Enter Table Name: " name
+    if [ -e "$name" ]; then
+        read -p "Enter column name: " column
+        if validate_column_name "$column"; then
+            read -p "Enter old value: " old_value
+            if validate_column_value "$old_value"; then
+                read -p "Enter new value: " new_value
+                if validate_column_value "$new_value"; then
+                    temp_file=$(mktemp)
+                    awk -F ',' -v col="$column" -v old_val="$old_value" -v new_val="$new_value" 'BEGIN{OFS=FS}{if ($col == old_val) $col = new_val}1' "$name" > "$temp_file"
+                    mv "$temp_file" "$name"
+                else
+                    echo "Please enter a valid new column value."
+                fi
+            else
+                echo "Please enter a valid old column value."
+            fi
+        else
+            echo "Please enter a valid column name."
+        fi
+    else
+        echo "Error: No such table name."
+    fi
+}
+
+function manage_tables {
+    select table_option in "Create Table" "Drop Table" "List Tables" "Select Data" "Insert Column" "Alter Column" "Insert Record" "Update Data" "Back to DB Menu"; do
+        case $table_option in
+            "Create Table")
+                read -p "Please Enter Table Name: " name
+                if [[ ! $name =~ ^[a-zA-Z0-9_]+$ ]]; then
+                    echo "Invalid table name. Use only alphanumeric characters and underscores."
+                elif [ -e "$name" ]; then
+                    echo "This table name already exists."
+                else
+                    touch "$name" || exit 1
+                    echo "Table '$name' created successfully."
+                    add_table_to_metadata "$PWD" "$name"
+                fi
+                ;;
+            "Drop Table")
+                read -p "Please Enter Table Name: " name
+                if [ -e "$name" ]; then
+                    rm "$name" || exit 1
+                    echo "Table '$name' removed successfully."
+                    sed -i "/Tables: $name/d" "metadata.txt"
+                else
+                    echo "Error: No such table name."
+                fi
+                ;;
+            "List Tables")
+                ls -1
+                ;;
+            "Select Data")
+                select_data
+                ;;
+            "Insert Column")
+                insert_column
+                ;;
+            "Alter Column")
+                alter_column
+                ;;
+            "Insert Record")
+                insert_record
+                ;;
+            "Update Data")
+                update_data
+                ;;
+            "Back to DB Menu")
+                return
+                ;;
+            *)
+                echo "Invalid option. Please try again."
+                ;;
+        esac
+    done
+}
+
+validate_column_name() {
+    local column_name="$1"
+    
+    if [[ ! $column_name =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+        echo "Invalid column name. Please use only alphanumeric characters and underscores. Must start with a letter or underscore."
+        return 1
+    fi
+    return 0
+}
+
+validate_column_value() {
+    local column_value="$1"
+ 
+    if [[ ! $column_value =~ ^[a-zA-Z0-9_]+$ ]]; then
+        echo "Invalid column value. Please use only alphanumeric characters and underscores."
+        return 1
+    fi
+    return 0
+}
+
+function select_data {
+    read -p "Please Enter Table Name: " name
+    if [ -e "$name" ]; then
+        PS3="$PWD/$name >>"
+        select variable in "Select all" "Select a column" "Select by a column" "Back to main menu"; do
+            case $variable in
+                "Select all")
+                    echo "Contents of '$name':"
+                    cat "$name"
+                    ;;
+                "Select a column")
+                    read -p "Enter column name: " column
+                    if validate_column_name "$column"; then
+                        awk -F ',' -v col="$column" '{print $col}' "$name"
+                    else
+                        echo "Please enter a valid column name."
+                    fi
+                    ;;
+                "Select by a column")
+                    read -p "Enter column name: " column
+                    if validate_column_name "$column"; then
+                        read -p "Enter value: " value
+                        if validate_column_value "$value"; then
+                            awk -F ',' -v col="$column" -v val="$value" '$col == val' "$name"
+                        else
+                            echo "Please enter a valid column value."
+                        fi
+                    else
+                        echo "Please enter a valid column name."
+                    fi
+                    ;;
+                "Back to main menu")
+                    return
+                    ;;
+                *)
+                    echo "Invalid option. Please try again."
+                    ;;
+            esac
+        done
+    else
+        echo "Error: No such table name."
+    fi
+}
+
+function sub_menu {
+    PS3="$PWD >>" 
+    select db_option in "Manage Tables" "Select Data" "Back to Main Menu"; do
+        case $db_option in
+            "Manage Tables")
+                manage_tables
+                ;;
+            "Select Data")
+                select_data
+                ;;
+            "Back to Main Menu")
+                cd ..
+                main_menu
+                ;;
+            *)
+                echo "Invalid option. Please try again."
+                ;;
+        esac
+    done
+}
+
+function main_menu {
+    select main_option in "Create DB" "Connect DB" "List DB" "Remove DB" "Exit"; do
+        case $main_option in
+            "Create DB")
+                create_db
+                ;;
+            "Connect DB")
+                read -p "Please Enter DB Name: " name
+                if [ -d "$name" ]; then
+                    cd "$name" || exit 1
+                    sub_menu
+                else
+                    echo "Error: No such DB name."
+                fi
+                ;;
+            "List DB")
+                list_db
+                ;;
+            "Remove DB")
+                remove_db
+                ;;
+            "Exit")
+                exit
+                ;;
+            *)
+                echo "Invalid option. Please try again."
+                ;;
+        esac
+    done
+}
+
+main_menu
